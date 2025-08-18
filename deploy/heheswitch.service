@@ -1,0 +1,22 @@
+[Unit]
+Description=HeheSwitch Rental Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/heheswitch
+Environment=PORT=8080
+ExecStart=/opt/heheswitch/heheswitch
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/heheswitch
+
+[Install]
+WantedBy=multi-user.target

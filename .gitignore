@@ -1,0 +1,40 @@
+# Build artifacts
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test cache & coverage
+*.out
+*.coverprofile
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# SQLite database & WAL/SHM side files
+*.db
+*.db-wal
+*.db-shm
+
+# Environment / local overrides
+.env
+
+# Backup files
+*~
+
+# Node leftovers (if any future tooling)
+node_modules/
+
+# Mac / system
+.DS_Store
+
+// 
+server

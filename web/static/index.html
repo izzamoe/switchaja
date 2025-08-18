@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Rental PS Admin</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🎮 Rental PS Admin</div>
+    <div class="actions">
+      <button id="refreshBtn" class="btn ghost" title="Refresh (R)">⟳</button>
+      <button id="darkToggle" class="btn ghost" title="Tema">🌙</button>
+  <button id="mqttBtn" class="btn ghost" title="MQTT Status">MQTT: <span id="mqttStatus">?</span></button>
+    </div>
+  </header>
+  <main>
+    <section class="summary" id="summary">
+      <div class="pill" id="clock">--:--:--</div>
+      <div class="pill" id="runningCount">Running: 0</div>
+    </section>
+    <section id="consoles" class="grid"></section>
+  </main>
+  <footer class="foot">Realtime via WebSocket • Klik harga untuk ubah.</footer>
+  <div id="modal-root"></div>
+
+<script>
+let lastData = [];
+let socket;
+let mqttPollTimer;
+let mqttPushActive = false;
+
+// Dark mode toggle
+const darkToggle = document.getElementById('darkToggle');
+darkToggle.addEventListener('click',()=>{
+  document.documentElement.classList.toggle('dark');
+  localStorage.setItem('theme', document.documentElement.classList.contains('dark')?'dark':'light');
+});
+if(localStorage.getItem('theme')==='dark'){ document.documentElement.classList.add('dark'); }
+
+document.getElementById('refreshBtn').addEventListener('click', () => sendStatusRequest());
+document.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='r') sendStatusRequest(); });
+document.getElementById('mqttBtn').addEventListener('click', openMqttModal);
+
+function tickClock(){
+  const d=new Date();
+  document.getElementById('clock').textContent = d.toLocaleTimeString();
+}
+setInterval(tickClock,1000); tickClock();
+
+function sendStatusRequest(){ if(socket && socket.readyState===1){ socket.send(JSON.stringify({type:'ping'})); } }
+
+function pct(a,b){ return b>0? Math.min(100, Math.max(0, (a/b)*100)) : 0 }
+
+// Incremental render (no full innerHTML replacement) to avoid flicker / layout shift
+function render(list){
+  const host = document.getElementById('consoles');
+  const existing = new Set();
+  let running = 0;
+  list.forEach(cs => {
+    existing.add(String(cs.id));
+    if(cs.status==='RUNNING') running++;
+    let card = host.querySelector(`.card[data-id="${cs.id}"]`);
+    const totalMin = cs.last_transaction ? cs.last_transaction.duration_minutes : 0;
+    const totalSec = totalMin * 60;
+    const remainingSec = cs.remaining_sec; // server snapshot
+    const elapsed = cs.status==='RUNNING' ? (totalSec - remainingSec) : 0;
+    const progress = cs.status==='RUNNING' ? pct(elapsed, totalSec) : 0;
+  const rate = cs.price_per_hour; // current price per hour
+  const last = cs.last_transaction ? `\n      <div class=\"tx-row\">\n        <div class=\"tx-time\">${new Date(cs.last_transaction.start_time).toLocaleTimeString()}</div>\n        <div class=\"tx-amount\">Rp ${cs.last_transaction.total_price.toLocaleString()}</div>\n      </div>\n      <div class=\"tx-meta\"><span>Dur ${cs.last_transaction.duration_minutes}m</span><span class=\"rate-snap\" title=\"Harga snapshot saat trx\">@ Rp ${cs.last_transaction.price_per_hour.toLocaleString()}/j</span><span class=\"current-rate editable-rate\" data-id=\"${cs.id}\" title=\"Edit harga sekarang\">Now Rp ${rate.toLocaleString()}/j</span></div>` : `<div class=\"last-empty\">Belum ada transaksi <span class=\"current-rate editable-rate\" data-id=\"${cs.id}\" title=\"Edit harga sekarang\">Harga: Rp ${rate.toLocaleString()}/j</span></div>`;
+    if(!card){
+      card = document.createElement('div');
+      card.className = 'card';
+      card.setAttribute('data-id', cs.id);
+      card.innerHTML = `
+        <div class="card-head">
+          <h3 class="c-name"></h3>
+          <div class="badge"></div>
+        </div>
+        <div class="progress-wrap" aria-label="Progress">
+          <div class="progress-bar"></div>
+          <div class="progress-text"></div>
+        </div>
+        <div class="last-tx"></div>
+        <div class="duration-input">
+          <label>
+            <span>Durasi (menit)</span>
+            <input type="number" min="5" step="5" value="60" id="dur-${cs.id}" />
+          </label>
+          <div class="quick" role="group" aria-label="Quick add">
+            ${[30,60,90,120].map(m=>`<button class="btn sm" data-add="${m}" data-target="${cs.id}">${m}</button>`).join('')}
+          </div>
+        </div>
+        <div class="controls">
+          <button class="btn primary" data-action="start" data-id="${cs.id}">Start</button>
+          <button class="btn warn" data-action="extend" data-id="${cs.id}">Extend</button>
+          <button class="btn danger" data-action="stop" data-id="${cs.id}">Stop</button>
+          <button class="btn ghost hist-btn" data-action="history" data-id="${cs.id}">Riwayat</button>
+          <button class="btn ghost price-edit-btn" data-action="edit-price" data-id="${cs.id}" title="Edit harga per jam">Edit Harga</button>
+        </div>`;
+      host.appendChild(card);
+    }
+    // Update static texts & classes only if changed
+    const nameEl = card.querySelector('.c-name');
+    if(nameEl && nameEl.textContent!==cs.name) nameEl.textContent = cs.name;
+    card.classList.toggle('running', cs.status==='RUNNING');
+    card.classList.toggle('idle', cs.status!=='RUNNING');
+    const badge = card.querySelector('.badge');
+    if(badge){
+      badge.className = 'badge ' + (cs.status==='RUNNING'?'live':'idle');
+      if(badge.textContent!==cs.status) badge.textContent = cs.status;
+    }
+    const bar = card.querySelector('.progress-bar');
+    if(bar){ bar.style.width = progress+'%'; }
+    const pText = card.querySelector('.progress-text');
+    if(pText){ pText.textContent = cs.status==='RUNNING' ? Math.ceil(remainingSec/60)+' mnt sisa' : ''; }
+    const lastWrap = card.querySelector('.last-tx');
+    if(lastWrap){
+      // hash includes last transaction id + current price so price changes trigger update
+      const hashVal = (cs.last_transaction ? cs.last_transaction.id : 'none') + ':' + rate;
+      if(lastWrap.getAttribute('data-hash') !== hashVal ){
+        lastWrap.innerHTML = last;
+        lastWrap.setAttribute('data-hash', hashVal);
+      }
+    }
+  });
+  // Remove cards no longer present
+  host.querySelectorAll('.card').forEach(c=>{ if(!existing.has(c.getAttribute('data-id'))) c.remove(); });
+  document.getElementById('runningCount').textContent = 'Running: '+running;
+}
+
+// Global click handler
+document.addEventListener('click', async e => {
+  const t = e.target;
+  if(t.matches('[data-action]')){
+    const id = parseInt(t.getAttribute('data-id'),10);
+    if(t.dataset.action==='start') return doStart(id);
+    if(t.dataset.action==='extend') return doExtend(id);
+    if(t.dataset.action==='stop') return doStop(id);
+    if(t.dataset.action==='history') return showHistory(id, 'PS'+id);
+    if(t.dataset.action==='edit-price') return openPriceModal(id);
+  }
+  if(t.matches('.quick .btn')){
+    const add = parseInt(t.getAttribute('data-add'),10);
+    const target = t.getAttribute('data-target');
+    const input = document.getElementById('dur-'+target);
+    input.value = add;
+  }
+  if(t.matches('.editable-rate')){ // still allow click on text
+    const id = parseInt(t.getAttribute('data-id'),10);
+    openPriceModal(id);
+  }
+});
+
+async function doStart(id){
+  const val = parseInt(document.getElementById('dur-'+id).value,10) || 60;
+  await fetch('/start',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({console_id:id,duration_minutes:val})});
+  sendStatusRequest();
+}
+
+function openPriceModal(id){
+  const cs = lastData.find(c=>c.id===id);
+  const current = cs ? cs.price_per_hour : 0;
+  const root = document.getElementById('modal-root');
+  const wrap = document.createElement('div'); wrap.className='modal-backdrop';
+  wrap.innerHTML = `<div class="modal"><button class="close" onclick="this.closest('.modal-backdrop').remove()">✖</button><h3>Edit Harga PS${id}</h3>
+  <form id="priceForm" class="form">
+    <label>Harga per jam (Rp)
+      <input type="number" name="price" min="1000" step="500" value="${current}" required />
+    </label>
+    <div style="display:flex;gap:.5rem;margin-top:1rem;justify-content:flex-end;">
+      <button type="submit" class="btn primary">Simpan</button>
+      <button type="button" class="btn ghost" onclick="this.closest('.modal-backdrop').remove()">Batal</button>
+    </div>
+  </form></div>`;
+  root.innerHTML=''; root.appendChild(wrap);
+  const form = wrap.querySelector('#priceForm');
+  form.addEventListener('submit', async ev=>{
+    ev.preventDefault();
+    const price = parseInt(form.price.value,10);
+    if(isNaN(price) || price<=0){ alert('Harga tidak valid'); return; }
+    const res = await fetch('/price',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({console_id:id,price_per_hour:price})});
+    if(!res.ok){ alert('Gagal update harga'); return; }
+    // Optimistic local update
+    const idx = lastData.findIndex(c=>c.id===id); if(idx>-1){ lastData[idx].price_per_hour = price; }
+    // force re-render of that card's price area
+    const card = document.querySelector(`.card[data-id="${id}"] .last-tx`);
+    if(card){ card.removeAttribute('data-hash'); }
+    render(lastData);
+    // also request fresh snapshot (will include broadcast too)
+    sendStatusRequest();
+    wrap.remove();
+  });
+}
+async function doExtend(id){
+  const val = parseInt(document.getElementById('dur-'+id).value,10) || 30;
+  await fetch('/extend',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({console_id:id,add_minutes:val})});
+  sendStatusRequest();
+}
+async function doStop(id){
+  await fetch('/stop',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({console_id:id})});
+  sendStatusRequest();
+}
+
+async function showHistory(id, name){
+  const res = await fetch(`/transactions/${id}`);
+  const list = await res.json();
+  const root = document.getElementById('modal-root');
+  const div = document.createElement('div');
+  div.className='modal-backdrop';
+  div.innerHTML = `<div class="modal"><button class="close" onclick="this.closest('.modal-backdrop').remove()">✖</button><h3>Riwayat ${name}</h3><table class="table"><thead><tr><th>Mulai</th><th>Selesai</th><th>Dur</th><th>Harga/j</th><th>Total</th></tr></thead><tbody>${list.map(t=>`<tr><td>${new Date(t.start_time).toLocaleTimeString()}</td><td>${new Date(t.end_time).toLocaleTimeString()}</td><td>${t.duration_minutes}m</td><td>Rp ${t.price_per_hour.toLocaleString()}</td><td>Rp ${t.total_price.toLocaleString()}</td></tr>`).join('')}</tbody></table></div>`;
+  root.innerHTML='';
+  root.appendChild(div);
+}
+
+// Smooth countdown using timestamps (no data mutation) to avoid jump/flicker
+setInterval(()=>{
+  const now = Date.now();
+  lastData.forEach(cs=>{
+    if(cs.status!=='RUNNING') return;
+  const card = document.querySelector(`.card[data-id="${cs.id}"]`); if(!card) return;
+    const totalMin = cs.last_transaction ? cs.last_transaction.duration_minutes : 0;
+    const totalSec = totalMin * 60;
+    const serverRemaining = cs.remaining_sec; // snapshot when message arrived
+    // approximate elapsed since receipt
+    if(!cs._receivedAt) cs._receivedAt = now; // stamp when first seen
+    const age = Math.floor((now - cs._receivedAt)/1000);
+    const remaining = Math.max(0, serverRemaining - age);
+    const elapsed = totalSec - remaining;
+    const progress = pct(elapsed,totalSec);
+    const bar = card.querySelector('.progress-bar'); if(bar) bar.style.width = progress+'%';
+    const text = card.querySelector('.progress-text'); if(text) text.textContent = Math.ceil(remaining/60)+' mnt sisa';
+  });
+}, 1000);
+
+function initWS(){
+  const proto = location.protocol==='https:'?'wss':'ws';
+  socket = new WebSocket(proto+'://'+location.host+'/ws');
+  socket.onopen = ()=>{ sendStatusRequest(); };
+  socket.onmessage = ev => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if(msg.type==='status') {
+        const stamp = Date.now();
+        lastData = msg.data.map(x=>{ x._receivedAt = stamp; return x });
+        render(lastData);
+      } else if(msg.type==='mqtt') {
+        const el = document.getElementById('mqttStatus');
+        if(el){
+          el.textContent = msg.connected? 'ON':'OFF';
+          el.style.color = msg.connected? 'var(--green)':'var(--danger)';
+          el.title = 'MQTT '+(msg.connected?'connected':'disconnected')+' retries:'+msg.retries+ (msg.prefix? (' prefix:'+msg.prefix):'');
+        }
+        if(!mqttPushActive){ mqttPushActive = true; if(mqttPollTimer) clearTimeout(mqttPollTimer); }
+      }
+    } catch(e){ console.error('ws message error', e); }
+  };
+  socket.onclose = ()=>{ setTimeout(initWS, 2000); };
+}
+initWS();
+// Initial snapshot via HTTP fallback (so UI not empty while WS handshake)
+fetch('/status').then(r=>r.json()).then(d=>{ lastData = d.map(x=>{ x._receivedAt=Date.now(); return x}); render(lastData); }).catch(()=>{});
+pollMqttStatus();
+function pollMqttStatus(){
+  if(mqttPushActive) return; // stop polling after WS starts pushing mqtt messages
+  fetch('/mqtt/status').then(r=>r.json()).then(s=>{
+    const el = document.getElementById('mqttStatus');
+    el.textContent = s.connected? 'ON':'OFF';
+    el.style.color = s.connected? 'var(--green)':'var(--danger)';
+  }).catch(()=>{});
+  mqttPollTimer = setTimeout(pollMqttStatus, 5000);
+}
+
+function openMqttModal(){
+  fetch('/mqtt/status').then(r=>r.json()).then(s=>{
+    const root = document.getElementById('modal-root');
+    const wrap = document.createElement('div'); wrap.className='modal-backdrop';
+    wrap.innerHTML = `<div class="modal">
+      <button class="close" onclick="this.closest('.modal-backdrop').remove()">✖</button>
+      <h3>MQTT Config</h3>
+      <form id="mqttForm" class="form">
+        <label>Broker <input name="broker" placeholder="tcp://host:1883" value="${s.connected? (localStorage.getItem('mqtt_broker')||'') : ''}" /></label>
+        <label>Prefix <input name="prefix" placeholder="ps" value="${s.prefix||''}" /></label>
+        <label>User <input name="username" value="${localStorage.getItem('mqtt_user')||''}" /></label>
+        <label>Password <input type="password" name="password" value="" autocomplete="new-password" /></label>
+        <div style="display:flex;gap:.5rem;margin-top:1rem;">
+          <button type="submit" class="btn primary">Simpan & Connect</button>
+          <button type="button" id="mqttDisconnect" class="btn danger">Disconnect</button>
+        </div>
+      </form>
+    </div>`;
+    root.innerHTML=''; root.appendChild(wrap);
+    const form = wrap.querySelector('#mqttForm');
+    form.addEventListener('submit', async ev=>{
+      ev.preventDefault();
+      const fd = new FormData(form);
+      const payload = {broker:fd.get('broker'), prefix:fd.get('prefix'), username:fd.get('username'), password:fd.get('password')};
+      localStorage.setItem('mqtt_broker', payload.broker);
+      localStorage.setItem('mqtt_user', payload.username);
+      const res = await fetch('/mqtt/config',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+      if(!res.ok){
+        const txt = await res.text();
+        alert('Connect gagal: '+txt);
+      }
+      pollMqttStatus();
+    });
+    wrap.querySelector('#mqttDisconnect').addEventListener('click', async ()=>{
+      await fetch('/mqtt/config',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({broker:""})});
+      pollMqttStatus();
+    });
+  });
+}
+</script>
+</body>
+</html>
