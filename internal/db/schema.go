@@ -253,6 +253,41 @@ func DueSoon(db *sql.DB, threshold time.Duration) ([]Console, error) {
 	return res, rows.Err()
 }
 
+// AutoStopExpired automatically stops any rentals that have passed their end time.
+// It sends OFF commands via the provided sender for each expired console.
+func AutoStopExpired(database *sql.DB, sender interface{ Send(consoleID int64, cmd string) error }) error {
+	// Find all running consoles that have expired
+	rows, err := database.Query(`SELECT id FROM consoles WHERE status='RUNNING' AND end_time <= ?`, time.Now())
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var expiredIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		expiredIDs = append(expiredIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// Stop each expired console
+	for _, id := range expiredIDs {
+		if err := StopRental(database, id); err != nil {
+			// Log error but continue with other consoles
+			continue
+		}
+		// Send OFF command to hardware
+		_ = sender.Send(id, "OFF")
+	}
+
+	return nil
+}
+
 func calcPrice(pricePerHour int, durationMin int) int {
 	// price is proportional to minutes (ceil to next minute already done by integer minutes)
 	return int(float64(pricePerHour) * (float64(durationMin) / 60.0))
