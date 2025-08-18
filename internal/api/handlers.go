@@ -3,13 +3,16 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"switchiot/internal/db"
 	"switchiot/internal/iot"
 
 	"github.com/gofiber/fiber/v2"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type API struct {
@@ -26,14 +29,149 @@ func New(database *sql.DB, sender iot.CommandSender, hub *iot.Hub) *API {
 }
 
 func (a *API) Register(app *fiber.App) {
-	app.Post("/start", a.start)
-	app.Post("/extend", a.extend)
-	app.Post("/stop", a.stop)
-	app.Get("/status", a.status)
-	app.Get("/transactions/:console_id", a.transactions)
-	app.Post("/price", a.updatePrice)
-	app.Get("/mqtt/status", a.mqttStatus)
-	app.Post("/mqtt/config", a.mqttConfig)
+	// auth routes
+	app.Post("/login", a.login)
+	app.Post("/logout", a.logout)
+	app.Get("/me", a.me)
+
+	// user management (admin)
+	app.Get("/users", a.authRequired("admin"), a.listUsers)
+	app.Post("/users", a.authRequired("admin"), a.createUser)
+	app.Delete("/users/:id", a.authRequired("admin"), a.deleteUser)
+
+	// protected game control endpoints (user or admin)
+	app.Post("/start", a.authRequired("user"), a.start)
+	app.Post("/extend", a.authRequired("user"), a.extend)
+	app.Post("/stop", a.authRequired("user"), a.stop)
+	app.Get("/status", a.authRequired("user"), a.status)
+	app.Get("/transactions/:console_id", a.authRequired("user"), a.transactions)
+	// price change only admin
+	app.Post("/price", a.authRequired("admin"), a.updatePrice)
+	// mqtt config only admin (status for any logged-in)
+	app.Get("/mqtt/status", a.authRequired("user"), a.mqttStatus)
+	app.Post("/mqtt/config", a.authRequired("admin"), a.mqttConfig)
+}
+
+// session cookie name
+const sessionCookie = "hehetoken"
+
+type sessionData struct {
+	UserID   int64  `json:"uid"`
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	IssuedAt int64  `json:"iat"`
+}
+
+// very small in-memory session store (map token->session)
+var sessions = struct{ m map[string]sessionData }{m: map[string]sessionData{}}
+
+// IsValidToken checks if token exists (for root route guard)
+func IsValidToken(tok string) bool {
+	if tok == "" {
+		return false
+	}
+	_, ok := sessions.m[tok]
+	return ok
+}
+
+// generate simple random token (not cryptographically strong but ok for local LAN usage)
+func newToken(u string) string { return fmt.Sprintf("%x", time.Now().UnixNano()) + "-" + u }
+
+// authRequired middleware; minRole can be "user" or "admin". Admin satisfies all.
+func (a *API) authRequired(minRole string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		tok := c.Cookies(sessionCookie)
+		if tok == "" {
+			return fiber.NewError(http.StatusUnauthorized, "unauthenticated")
+		}
+		sd, ok := sessions.m[tok]
+		if !ok {
+			return fiber.NewError(http.StatusUnauthorized, "invalid session")
+		}
+		// role check
+		if minRole == "admin" && sd.Role != "admin" {
+			return fiber.NewError(http.StatusForbidden, "admin only")
+		}
+		// attach user context
+		c.Locals("user", sd)
+		return c.Next()
+	}
+}
+
+func (a *API) login(c *fiber.Ctx) error {
+	var body struct{ Username, Password string }
+	if err := c.BodyParser(&body); err != nil {
+		return fiber.NewError(400, err.Error())
+	}
+	u, hash, ok, err := db.GetUserByUsername(a.DB, strings.TrimSpace(body.Username))
+	if err != nil || !ok {
+		return fiber.NewError(401, "login gagal")
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(body.Password)) != nil {
+		return fiber.NewError(401, "login gagal")
+	}
+	tok := newToken(u.Username)
+	sessions.m[tok] = sessionData{UserID: u.ID, Username: u.Username, Role: u.Role, IssuedAt: time.Now().Unix()}
+	c.Cookie(&fiber.Cookie{Name: sessionCookie, Value: tok, HTTPOnly: true, Secure: false, SameSite: "Lax", Path: "/", Expires: time.Now().Add(12 * time.Hour)})
+	return c.JSON(fiber.Map{"status": "ok", "user": u})
+}
+
+func (a *API) logout(c *fiber.Ctx) error {
+	tok := c.Cookies(sessionCookie)
+	if tok != "" {
+		delete(sessions.m, tok)
+	}
+	c.Cookie(&fiber.Cookie{Name: sessionCookie, Value: "", Expires: time.Now().Add(-1 * time.Hour), Path: "/"})
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+func (a *API) me(c *fiber.Ctx) error {
+	tok := c.Cookies(sessionCookie)
+	sd, ok := sessions.m[tok]
+	if !ok {
+		return fiber.NewError(401, "unauthenticated")
+	}
+	return c.JSON(sd)
+}
+
+// user management handlers
+func (a *API) listUsers(c *fiber.Ctx) error {
+	users, err := db.ListUsers(a.DB)
+	if err != nil {
+		return fiber.NewError(500, err.Error())
+	}
+	return c.JSON(users)
+}
+
+func (a *API) createUser(c *fiber.Ctx) error {
+	var body struct{ Username, Password, Role string }
+	if err := c.BodyParser(&body); err != nil {
+		return fiber.NewError(400, err.Error())
+	}
+	body.Username = strings.TrimSpace(body.Username)
+	if body.Username == "" || body.Password == "" {
+		return fiber.NewError(400, "username/password required")
+	}
+	if body.Role == "" {
+		body.Role = "user"
+	}
+	h, _ := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+	id, err := db.CreateUser(a.DB, body.Username, string(h), body.Role)
+	if err != nil {
+		return fiber.NewError(400, err.Error())
+	}
+	return c.JSON(fiber.Map{"id": id})
+}
+
+func (a *API) deleteUser(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		return fiber.NewError(400, "invalid id")
+	}
+	if err := db.DeleteUser(a.DB, int64(id)); err != nil {
+		return fiber.NewError(400, err.Error())
+	}
+	return c.JSON(fiber.Map{"status": "deleted"})
 }
 
 func (a *API) start(c *fiber.Ctx) error {

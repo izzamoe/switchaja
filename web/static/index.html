@@ -13,6 +13,8 @@
       <button id="refreshBtn" class="btn ghost" title="Refresh (R)">⟳</button>
       <button id="darkToggle" class="btn ghost" title="Tema">🌙</button>
   <button id="mqttBtn" class="btn ghost" title="MQTT Status">MQTT: <span id="mqttStatus">?</span></button>
+      <button id="adminBtn" class="btn ghost" title="Admin" style="display:none">⚙️</button>
+      <button id="logoutBtn" class="btn ghost" title="Logout" style="display:none">⎋</button>
     </div>
   </header>
   <main>
@@ -30,6 +32,7 @@ let lastData = [];
 let socket;
 let mqttPollTimer;
 let mqttPushActive = false;
+let currentUser = null;
 
 // Dark mode toggle
 const darkToggle = document.getElementById('darkToggle');
@@ -42,6 +45,11 @@ if(localStorage.getItem('theme')==='dark'){ document.documentElement.classList.a
 document.getElementById('refreshBtn').addEventListener('click', () => sendStatusRequest());
 document.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='r') sendStatusRequest(); });
 document.getElementById('mqttBtn').addEventListener('click', openMqttModal);
+// gunakan wrapper agar tidak ReferenceError sebelum fungsi didefinisikan (script kedua)
+document.getElementById('adminBtn').addEventListener('click', ()=>{ if(typeof openAdminPanel==='function'){ openAdminPanel(); } });
+document.getElementById('logoutBtn').addEventListener('click', async ()=>{ await fetch('/logout',{method:'POST'}); location.href='/login'; });
+
+fetch('/me').then(r=>{ if(!r.ok){ location.href='/login'; return; } return r.json(); }).then(u=>{ currentUser=u; if(u.role==='admin'){ document.getElementById('adminBtn').style.display='inline-flex'; } document.getElementById('logoutBtn').style.display='inline-flex'; }).catch(()=>{ location.href='/login'; });
 
 function tickClock(){
   const d=new Date();
@@ -160,6 +168,7 @@ async function doStart(id){
 }
 
 function openPriceModal(id){
+  if(!currentUser || currentUser.role!=='admin'){ alert('Hanya admin yang bisa ubah harga'); return; }
   const cs = lastData.find(c=>c.id===id);
   const current = cs ? cs.price_per_hour : 0;
   const root = document.getElementById('modal-root');
@@ -260,7 +269,7 @@ function initWS(){
 }
 initWS();
 // Initial snapshot via HTTP fallback (so UI not empty while WS handshake)
-fetch('/status').then(r=>r.json()).then(d=>{ lastData = d.map(x=>{ x._receivedAt=Date.now(); return x}); render(lastData); }).catch(()=>{});
+fetch('/status').then(r=>{ if(!r.ok){ if(r.status===401) location.href='/login'; return []; } return r.json(); }).then(d=>{ if(!Array.isArray(d)) return; lastData = d.map(x=>{ x._receivedAt=Date.now(); return x}); render(lastData); }).catch(()=>{});
 pollMqttStatus();
 function pollMqttStatus(){
   if(mqttPushActive) return; // stop polling after WS starts pushing mqtt messages
@@ -273,6 +282,7 @@ function pollMqttStatus(){
 }
 
 function openMqttModal(){
+  if(!currentUser || currentUser.role!=='admin'){ alert('Admin only'); return; }
   fetch('/mqtt/status').then(r=>r.json()).then(s=>{
     const root = document.getElementById('modal-root');
     const wrap = document.createElement('div'); wrap.className='modal-backdrop';
@@ -309,6 +319,37 @@ function openMqttModal(){
       await fetch('/mqtt/config',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({broker:""})});
       pollMqttStatus();
     });
+  });
+}
+</script>
+<script>
+function openAdminPanel(){
+  if(!currentUser || currentUser.role!=='admin') return;
+  fetch('/users').then(r=>r.json()).then(users=>{
+    const root=document.getElementById('modal-root');
+    const wrap=document.createElement('div'); wrap.className='modal-backdrop';
+    wrap.innerHTML=`<div class="modal"><button class="close" onclick="this.closest('.modal-backdrop').remove()">✖</button><h3>Admin Panel</h3>
+    <section style="display:flex;flex-direction:column;gap:14px;">
+      <div>
+        <h4 style="margin:0 0 6px;font-size:.8rem;">Tambah User</h4>
+        <form id="userForm" class="form">
+          <div class="inline"><label style="flex:1">Username<input name="username" required /></label><label style="flex:1">Password<input name="password" required type="password" /></label><label style="flex:1">Role<select name="role"><option value="user">User</option><option value="admin">Admin</option></select></label></div>
+          <div class="actions-row"><button class="btn primary" type="submit">Tambah</button></div>
+        </form>
+      </div>
+      <div>
+        <h4 style="margin:10px 0 6px;font-size:.8rem;">Daftar User</h4>
+        <table class="table"><thead><tr><th>ID</th><th>Username</th><th>Role</th><th></th></tr></thead><tbody>
+          ${users.map(u=>`<tr><td>${u.id}</td><td>${u.username}</td><td>${u.role}</td><td>${u.username==='admin'?'':`<button class='btn danger sm' data-del='${u.id}'>Hapus</button>`}</td></tr>`).join('')}
+        </tbody></table>
+      </div>
+    </section></div>`;
+    root.innerHTML=''; root.appendChild(wrap);
+    wrap.querySelector('#userForm').addEventListener('submit', async ev=>{
+      ev.preventDefault(); const fd=new FormData(ev.target); const payload={username:fd.get('username'),password:fd.get('password'),role:fd.get('role')};
+      const res=await fetch('/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); if(!res.ok){ alert('Gagal tambah user'); return; } openAdminPanel();
+    });
+    wrap.querySelectorAll('[data-del]').forEach(btn=>btn.addEventListener('click', async ()=>{ if(!confirm('Hapus user?')) return; const id=btn.getAttribute('data-del'); const res=await fetch('/users/'+id,{method:'DELETE'}); if(res.ok){ btn.closest('tr').remove(); } }));
   });
 }
 </script>

@@ -36,5 +36,4 @@ node_modules/
 # Mac / system
 .DS_Store
 
-// 
-server
+# Do not ignore source directory cmd/server; previously 'server' caused it to be skipped.

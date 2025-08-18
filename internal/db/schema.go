@@ -55,6 +55,17 @@ func Init(db *sql.DB, consoleCount int, pricePerHour int) error {
 	if err != nil {
 		return err
 	}
+	// users (auth). role: 'admin' or 'user'.
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT NOT NULL UNIQUE,
+		password_hash TEXT NOT NULL,
+		role TEXT NOT NULL,
+		created_at DATETIME NOT NULL
+	);`)
+	if err != nil {
+		return err
+	}
 	// generic settings key-value
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`)
 	if err != nil {
@@ -107,6 +118,72 @@ func Init(db *sql.DB, consoleCount int, pricePerHour int) error {
 		_, _ = db.Exec(`ALTER TABLE transactions ADD COLUMN price_per_hour_snapshot INTEGER`)
 	}
 	return nil
+}
+
+// ----- Users & Auth -----
+
+type User struct {
+	ID        int64     `json:"id"`
+	Username  string    `json:"username"`
+	Role      string    `json:"role"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// CreateUser inserts a new user (hashed password already) returns id.
+func CreateUser(dbx *sql.DB, username, passwordHash, role string) (int64, error) {
+	if role != "admin" && role != "user" {
+		return 0, errors.New("invalid role")
+	}
+	res, err := dbx.Exec(`INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)`, username, passwordHash, role, time.Now())
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// GetUserByUsername fetches user and hash.
+func GetUserByUsername(dbx *sql.DB, username string) (User, string, bool, error) {
+	row := dbx.QueryRow(`SELECT id, username, password_hash, role, created_at FROM users WHERE username=?`, username)
+	var u User
+	var hash string
+	if err := row.Scan(&u.ID, &u.Username, &hash, &u.Role, &u.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return User{}, "", false, nil
+		}
+		return User{}, "", false, err
+	}
+	return u, hash, true, nil
+}
+
+// ListUsers returns all users (without password hash).
+func ListUsers(dbx *sql.DB) ([]User, error) {
+	rows, err := dbx.Query(`SELECT id, username, role, created_at FROM users ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, u)
+	}
+	return list, rows.Err()
+}
+
+// DeleteUser removes user by id.
+func DeleteUser(dbx *sql.DB, id int64) error {
+	_, err := dbx.Exec(`DELETE FROM users WHERE id=?`, id)
+	return err
+}
+
+// CountUsers returns count.
+func CountUsers(dbx *sql.DB) (int, error) {
+	var c int
+	err := dbx.QueryRow(`SELECT COUNT(1) FROM users`).Scan(&c)
+	return c, err
 }
 
 // GetConsoles returns all consoles.
