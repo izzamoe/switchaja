@@ -29,27 +29,30 @@ func New(database *sql.DB, sender iot.CommandSender, hub *iot.Hub) *API {
 }
 
 func (a *API) Register(app *fiber.App) {
-	// auth routes
+	// -------- Public (no auth) --------
 	app.Post("/login", a.login)
+	// me & logout need a valid cookie but keep simple (they self-handle 401)
 	app.Post("/logout", a.logout)
 	app.Get("/me", a.me)
 
-	// user management (admin)
-	app.Get("/users", a.authRequired("admin"), a.listUsers)
-	app.Post("/users", a.authRequired("admin"), a.createUser)
-	app.Delete("/users/:id", a.authRequired("admin"), a.deleteUser)
+	// -------- Grouped Protected Routes --------
+	userGroup := app.Group("/", a.authRequired("user"))   // any logged in user (role user/admin)
+	adminGroup := app.Group("/", a.authRequired("admin")) // admin only
 
-	// protected game control endpoints (user or admin)
-	app.Post("/start", a.authRequired("user"), a.start)
-	app.Post("/extend", a.authRequired("user"), a.extend)
-	app.Post("/stop", a.authRequired("user"), a.stop)
-	app.Get("/status", a.authRequired("user"), a.status)
-	app.Get("/transactions/:console_id", a.authRequired("user"), a.transactions)
-	// price change only admin
-	app.Post("/price", a.authRequired("admin"), a.updatePrice)
-	// mqtt config only admin (status for any logged-in)
-	app.Get("/mqtt/status", a.authRequired("user"), a.mqttStatus)
-	app.Post("/mqtt/config", a.authRequired("admin"), a.mqttConfig)
+	// user capabilities (includes admin)
+	userGroup.Post("start", a.start)
+	userGroup.Post("extend", a.extend)
+	userGroup.Post("stop", a.stop)
+	userGroup.Get("status", a.status)
+	userGroup.Get("transactions/:console_id", a.transactions)
+	userGroup.Get("mqtt/status", a.mqttStatus)
+
+	// admin only
+	adminGroup.Get("users", a.listUsers)
+	adminGroup.Post("users", a.createUser)
+	adminGroup.Delete("users/:id", a.deleteUser)
+	adminGroup.Post("price", a.updatePrice)
+	adminGroup.Post("mqtt/config", a.mqttConfig)
 }
 
 // session cookie name
