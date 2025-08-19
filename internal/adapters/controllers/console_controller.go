@@ -3,6 +3,7 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"switchiot/internal/domain/errors"
 	"switchiot/internal/domain/usecases"
 
 	"github.com/gofiber/fiber/v2"
@@ -26,7 +27,7 @@ func NewConsoleController(consoleService usecases.ConsoleService, transactionSer
 func (cc *ConsoleController) GetStatus(c *fiber.Ctx) error {
 	consoles, err := cc.consoleService.GetAllConsoles()
 	if err != nil {
-		return fiber.NewError(http.StatusInternalServerError, err.Error())
+		return cc.handleError(c, err)
 	}
 	return c.JSON(consoles)
 }
@@ -39,11 +40,11 @@ func (cc *ConsoleController) StartRental(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&request); err != nil {
-		return fiber.NewError(http.StatusBadRequest, err.Error())
+		return fiber.NewError(http.StatusBadRequest, "invalid request body")
 	}
 
 	if err := cc.consoleService.StartRental(request.ConsoleID, request.DurationMin); err != nil {
-		return fiber.NewError(http.StatusBadRequest, err.Error())
+		return cc.handleError(c, err)
 	}
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -57,11 +58,11 @@ func (cc *ConsoleController) ExtendRental(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&request); err != nil {
-		return fiber.NewError(http.StatusBadRequest, err.Error())
+		return fiber.NewError(http.StatusBadRequest, "invalid request body")
 	}
 
 	if err := cc.consoleService.ExtendRental(request.ConsoleID, request.AddMinutes); err != nil {
-		return fiber.NewError(http.StatusBadRequest, err.Error())
+		return cc.handleError(c, err)
 	}
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -74,11 +75,11 @@ func (cc *ConsoleController) StopRental(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&request); err != nil {
-		return fiber.NewError(http.StatusBadRequest, err.Error())
+		return fiber.NewError(http.StatusBadRequest, "invalid request body")
 	}
 
 	if err := cc.consoleService.StopRental(request.ConsoleID); err != nil {
-		return fiber.NewError(http.StatusBadRequest, err.Error())
+		return cc.handleError(c, err)
 	}
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -92,11 +93,11 @@ func (cc *ConsoleController) UpdatePrice(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&request); err != nil {
-		return fiber.NewError(http.StatusBadRequest, err.Error())
+		return fiber.NewError(http.StatusBadRequest, "invalid request body")
 	}
 
 	if err := cc.consoleService.UpdatePrice(request.ConsoleID, request.NewPrice); err != nil {
-		return fiber.NewError(http.StatusBadRequest, err.Error())
+		return cc.handleError(c, err)
 	}
 
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -112,8 +113,27 @@ func (cc *ConsoleController) GetTransactions(c *fiber.Ctx) error {
 
 	transactions, err := cc.transactionService.GetTransactionsByConsole(consoleID)
 	if err != nil {
-		return fiber.NewError(http.StatusInternalServerError, err.Error())
+		return cc.handleError(c, err)
 	}
 
 	return c.JSON(transactions)
+}
+
+// handleError converts domain errors to appropriate HTTP responses
+func (cc *ConsoleController) handleError(c *fiber.Ctx, err error) error {
+	if domainErr, ok := err.(*errors.DomainError); ok {
+		switch domainErr.Code {
+		case errors.CodeConsoleNotFound:
+			return fiber.NewError(http.StatusNotFound, domainErr.Message)
+		case errors.CodeConsoleAlreadyRunning, errors.CodeConsoleNotRunning:
+			return fiber.NewError(http.StatusConflict, domainErr.Message)
+		case errors.CodeInvalidDuration, errors.CodeInvalidPrice:
+			return fiber.NewError(http.StatusBadRequest, domainErr.Message)
+		case errors.CodeInternalError:
+			return fiber.NewError(http.StatusInternalServerError, "internal server error")
+		default:
+			return fiber.NewError(http.StatusBadRequest, domainErr.Message)
+		}
+	}
+	return fiber.NewError(http.StatusInternalServerError, "internal server error")
 }

@@ -1,8 +1,9 @@
 package usecases
 
 import (
-	"fmt"
+	"database/sql"
 	"switchiot/internal/domain/entities"
+	"switchiot/internal/domain/errors"
 	"switchiot/internal/domain/repositories"
 	"switchiot/internal/domain/usecases"
 
@@ -24,38 +25,51 @@ func NewUserUseCase(userRepo repositories.UserRepository) usecases.UserService {
 // CreateUser creates a new user with hashed password
 func (u *UserUseCase) CreateUser(username, password, role string) (int64, error) {
 	if username == "" {
-		return 0, fmt.Errorf("username cannot be empty")
+		return 0, errors.NewInvalidUserData("username cannot be empty")
 	}
 	if password == "" {
-		return 0, fmt.Errorf("password cannot be empty")
+		return 0, errors.NewInvalidUserData("password cannot be empty")
 	}
 	if role != entities.RoleAdmin && role != entities.RoleUser {
-		return 0, fmt.Errorf("invalid role: %s", role)
+		return 0, errors.NewInvalidUserData("invalid role: " + role)
+	}
+
+	// Check if user already exists
+	if _, _, err := u.userRepo.GetByUsername(username); err == nil {
+		return 0, errors.NewUserAlreadyExists(username)
 	}
 
 	// Hash the password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return 0, fmt.Errorf("failed to hash password: %w", err)
+		return 0, errors.NewInternalError(err)
 	}
 
-	return u.userRepo.Create(username, string(hashedPassword), role)
+	userID, err := u.userRepo.Create(username, string(hashedPassword), role)
+	if err != nil {
+		return 0, errors.NewInternalError(err)
+	}
+
+	return userID, nil
 }
 
 // AuthenticateUser authenticates a user and returns user info
 func (u *UserUseCase) AuthenticateUser(username, password string) (*entities.User, error) {
 	if username == "" || password == "" {
-		return nil, fmt.Errorf("username and password are required")
+		return nil, errors.NewInvalidCredentials()
 	}
 
 	user, hashedPassword, err := u.userRepo.GetByUsername(username)
 	if err != nil {
-		return nil, fmt.Errorf("user not found")
+		if err == sql.ErrNoRows {
+			return nil, errors.NewInvalidCredentials()
+		}
+		return nil, errors.NewInternalError(err)
 	}
 
 	// Check password
 	if err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password)); err != nil {
-		return nil, fmt.Errorf("invalid credentials")
+		return nil, errors.NewInvalidCredentials()
 	}
 
 	return user, nil
@@ -63,18 +77,31 @@ func (u *UserUseCase) AuthenticateUser(username, password string) (*entities.Use
 
 // GetAllUsers returns all users
 func (u *UserUseCase) GetAllUsers() ([]entities.User, error) {
-	return u.userRepo.GetAll()
+	users, err := u.userRepo.GetAll()
+	if err != nil {
+		return nil, errors.NewInternalError(err)
+	}
+	return users, nil
 }
 
 // DeleteUser deletes a user by ID
 func (u *UserUseCase) DeleteUser(id int64) error {
 	if id <= 0 {
-		return fmt.Errorf("invalid user ID")
+		return errors.NewInvalidUserData("invalid user ID")
 	}
-	return u.userRepo.Delete(id)
+
+	err := u.userRepo.Delete(id)
+	if err != nil {
+		return errors.NewInternalError(err)
+	}
+	return nil
 }
 
 // GetUserCount returns the total number of users
 func (u *UserUseCase) GetUserCount() (int, error) {
-	return u.userRepo.Count()
+	count, err := u.userRepo.Count()
+	if err != nil {
+		return 0, errors.NewInternalError(err)
+	}
+	return count, nil
 }

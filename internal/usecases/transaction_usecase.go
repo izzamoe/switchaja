@@ -2,6 +2,7 @@ package usecases
 
 import (
 	"switchiot/internal/domain/entities"
+	"switchiot/internal/domain/errors"
 	"switchiot/internal/domain/repositories"
 	"switchiot/internal/domain/usecases"
 )
@@ -20,10 +21,18 @@ func NewTransactionUseCase(transactionRepo repositories.TransactionRepository) u
 
 // GetTransactionsByConsole returns transactions for a specific console
 func (t *TransactionUseCase) GetTransactionsByConsole(consoleID int64) ([]entities.Transaction, error) {
-	return t.transactionRepo.GetByConsoleID(consoleID, 50) // Limit to 50 recent transactions
+	transactions, err := t.transactionRepo.GetByConsoleID(consoleID, 50) // Limit to 50 recent transactions
+	if err != nil {
+		return nil, errors.NewInternalError(err)
+	}
+	return transactions, nil
 }
 
 // GetLastTransaction returns the most recent transaction for a console
 func (t *TransactionUseCase) GetLastTransaction(consoleID int64) (*entities.Transaction, error) {
-	return t.transactionRepo.GetLast(consoleID)
+	transaction, err := t.transactionRepo.GetLast(consoleID)
+	if err != nil {
+		return nil, errors.NewInternalError(err)
+	}
+	return transaction, nil
 }

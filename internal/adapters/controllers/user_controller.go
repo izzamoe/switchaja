@@ -3,6 +3,7 @@ package controllers
 import (
 	"net/http"
 	"strconv"
+	"switchiot/internal/domain/errors"
 	"switchiot/internal/domain/usecases"
 
 	"github.com/gofiber/fiber/v2"
@@ -28,12 +29,12 @@ func (uc *UserController) Login(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&request); err != nil {
-		return fiber.NewError(http.StatusBadRequest, err.Error())
+		return fiber.NewError(http.StatusBadRequest, "invalid request body")
 	}
 
 	user, err := uc.userService.AuthenticateUser(request.Username, request.Password)
 	if err != nil {
-		return fiber.NewError(http.StatusUnauthorized, "invalid credentials")
+		return uc.handleError(c, err)
 	}
 
 	// Here you would typically create a session token
@@ -48,7 +49,7 @@ func (uc *UserController) Login(c *fiber.Ctx) error {
 func (uc *UserController) GetAllUsers(c *fiber.Ctx) error {
 	users, err := uc.userService.GetAllUsers()
 	if err != nil {
-		return fiber.NewError(http.StatusInternalServerError, err.Error())
+		return uc.handleError(c, err)
 	}
 	return c.JSON(users)
 }
@@ -62,12 +63,12 @@ func (uc *UserController) CreateUser(c *fiber.Ctx) error {
 	}
 
 	if err := c.BodyParser(&request); err != nil {
-		return fiber.NewError(http.StatusBadRequest, err.Error())
+		return fiber.NewError(http.StatusBadRequest, "invalid request body")
 	}
 
 	userID, err := uc.userService.CreateUser(request.Username, request.Password, request.Role)
 	if err != nil {
-		return fiber.NewError(http.StatusBadRequest, err.Error())
+		return uc.handleError(c, err)
 	}
 
 	return c.JSON(fiber.Map{
@@ -85,8 +86,31 @@ func (uc *UserController) DeleteUser(c *fiber.Ctx) error {
 	}
 
 	if err := uc.userService.DeleteUser(userID); err != nil {
-		return fiber.NewError(http.StatusBadRequest, err.Error())
+		return uc.handleError(c, err)
 	}
 
 	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// handleError converts domain errors to appropriate HTTP responses
+func (uc *UserController) handleError(c *fiber.Ctx, err error) error {
+	if domainErr, ok := err.(*errors.DomainError); ok {
+		switch domainErr.Code {
+		case errors.CodeUserNotFound:
+			return fiber.NewError(http.StatusNotFound, domainErr.Message)
+		case errors.CodeInvalidCredentials:
+			return fiber.NewError(http.StatusUnauthorized, domainErr.Message)
+		case errors.CodeUserAlreadyExists:
+			return fiber.NewError(http.StatusConflict, domainErr.Message)
+		case errors.CodeInvalidUserData:
+			return fiber.NewError(http.StatusBadRequest, domainErr.Message)
+		case errors.CodeUnauthorized:
+			return fiber.NewError(http.StatusUnauthorized, domainErr.Message)
+		case errors.CodeInternalError:
+			return fiber.NewError(http.StatusInternalServerError, "internal server error")
+		default:
+			return fiber.NewError(http.StatusBadRequest, domainErr.Message)
+		}
+	}
+	return fiber.NewError(http.StatusInternalServerError, "internal server error")
 }
