@@ -36,8 +36,8 @@ func (a *API) Register(app *fiber.App) {
 	app.Get("/me", a.me)
 
 	// -------- Grouped Protected Routes --------
-	userGroup := app.Group("/", a.authRequired("user"))   // any logged in user (role user/admin)
-	adminGroup := app.Group("/", a.authRequired("admin")) // admin only
+	userGroup := app.Group("/api/", a.authRequired("user"))   // any logged in user (role user/admin)
+	adminGroup := app.Group("/api/", a.authRequired("admin")) // admin only
 
 	// user capabilities (includes admin)
 	userGroup.Post("start", a.start)
@@ -46,6 +46,12 @@ func (a *API) Register(app *fiber.App) {
 	userGroup.Get("status", a.status)
 	userGroup.Get("transactions/:console_id", a.transactions)
 	userGroup.Get("mqtt/status", a.mqttStatus)
+	
+	// reports endpoints
+	userGroup.Get("reports/daily", a.dailyReport)
+	userGroup.Get("reports/monthly", a.monthlyReport)
+	userGroup.Get("reports/transactions", a.transactionReport)
+	userGroup.Get("reports/export", a.exportTransactions)
 
 	// admin only
 	adminGroup.Get("users", a.listUsers)
@@ -53,6 +59,23 @@ func (a *API) Register(app *fiber.App) {
 	adminGroup.Delete("users/:id", a.deleteUser)
 	adminGroup.Post("price", a.updatePrice)
 	adminGroup.Post("mqtt/config", a.mqttConfig)
+
+	// Legacy routes without /api prefix for backward compatibility
+	app.Post("/start", a.authRequired("user"), a.start)
+	app.Post("/extend", a.authRequired("user"), a.extend)
+	app.Post("/stop", a.authRequired("user"), a.stop)
+	app.Get("/status", a.authRequired("user"), a.status)
+	app.Get("/transactions/:console_id", a.authRequired("user"), a.transactions)
+	app.Get("/mqtt/status", a.authRequired("user"), a.mqttStatus)
+	app.Get("/reports/daily", a.authRequired("user"), a.dailyReport)
+	app.Get("/reports/monthly", a.authRequired("user"), a.monthlyReport)
+	app.Get("/reports/transactions", a.authRequired("user"), a.transactionReport)
+	app.Get("/reports/export", a.authRequired("user"), a.exportTransactions)
+	app.Get("/users", a.authRequired("admin"), a.listUsers)
+	app.Post("/users", a.authRequired("admin"), a.createUser)
+	app.Delete("/users/:id", a.authRequired("admin"), a.deleteUser)
+	app.Post("/price", a.authRequired("admin"), a.updatePrice)
+	app.Post("/mqtt/config", a.authRequired("admin"), a.mqttConfig)
 }
 
 // session cookie name
@@ -271,6 +294,303 @@ func (a *API) transactions(c *fiber.Ctx) error {
 		list = append(list, t)
 	}
 	return c.JSON(list)
+}
+
+// dailyReport returns daily summary of total hours and revenue
+func (a *API) dailyReport(c *fiber.Ctx) error {
+	dateParam := c.Query("date") // Format: YYYY-MM-DD
+	if dateParam == "" {
+		dateParam = time.Now().Format("2006-01-02")
+	}
+	
+	// Parse the date
+	date, err := time.Parse("2006-01-02", dateParam)
+	if err != nil {
+		return fiber.NewError(http.StatusBadRequest, "invalid date format, use YYYY-MM-DD")
+	}
+	
+	// Get start and end of the day
+	startOfDay := date.Truncate(24 * time.Hour)
+	endOfDay := startOfDay.Add(24 * time.Hour)
+	
+	// Query for transactions in this day
+	rows, err := a.DB.Query(`
+		SELECT COALESCE(SUM(duration_minutes), 0) as total_minutes, 
+		       COALESCE(SUM(total_price), 0) as total_revenue,
+		       COUNT(*) as total_transactions
+		FROM transactions 
+		WHERE start_time >= ? AND start_time < ?`, 
+		startOfDay, endOfDay)
+	if err != nil {
+		return fiber.NewError(http.StatusInternalServerError, err.Error())
+	}
+	defer rows.Close()
+	
+	var totalMinutes, totalRevenue, totalTransactions int
+	if rows.Next() {
+		if err := rows.Scan(&totalMinutes, &totalRevenue, &totalTransactions); err != nil {
+			return fiber.NewError(http.StatusInternalServerError, err.Error())
+		}
+	}
+	
+	// Convert minutes to hours
+	totalHours := float64(totalMinutes) / 60.0
+	
+	return c.JSON(fiber.Map{
+		"date": dateParam,
+		"total_hours": totalHours,
+		"total_revenue": totalRevenue,
+		"total_transactions": totalTransactions,
+	})
+}
+
+// monthlyReport returns monthly summary with revenue recap and hours per console
+func (a *API) monthlyReport(c *fiber.Ctx) error {
+	monthParam := c.Query("month") // Format: YYYY-MM
+	if monthParam == "" {
+		monthParam = time.Now().Format("2006-01")
+	}
+	
+	// Parse the month
+	month, err := time.Parse("2006-01", monthParam)
+	if err != nil {
+		return fiber.NewError(http.StatusBadRequest, "invalid month format, use YYYY-MM")
+	}
+	
+	// Get start and end of the month
+	startOfMonth := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, month.Location())
+	endOfMonth := startOfMonth.AddDate(0, 1, 0)
+	
+	// Query for overall monthly summary
+	row := a.DB.QueryRow(`
+		SELECT COALESCE(SUM(duration_minutes), 0) as total_minutes, 
+		       COALESCE(SUM(total_price), 0) as total_revenue,
+		       COUNT(*) as total_transactions
+		FROM transactions 
+		WHERE start_time >= ? AND start_time < ?`, 
+		startOfMonth, endOfMonth)
+	
+	var totalMinutes, totalRevenue, totalTransactions int
+	if err := row.Scan(&totalMinutes, &totalRevenue, &totalTransactions); err != nil {
+		return fiber.NewError(http.StatusInternalServerError, err.Error())
+	}
+	
+	// Query for per-console breakdown
+	rows, err := a.DB.Query(`
+		SELECT c.id, c.name, 
+		       COALESCE(SUM(t.duration_minutes), 0) as total_minutes,
+		       COALESCE(SUM(t.total_price), 0) as total_revenue,
+		       COUNT(t.id) as total_transactions
+		FROM consoles c
+		LEFT JOIN transactions t ON c.id = t.console_id 
+		    AND t.start_time >= ? AND t.start_time < ?
+		GROUP BY c.id, c.name
+		ORDER BY c.id`, 
+		startOfMonth, endOfMonth)
+	if err != nil {
+		return fiber.NewError(http.StatusInternalServerError, err.Error())
+	}
+	defer rows.Close()
+	
+	type ConsoleStats struct {
+		ID               int64   `json:"console_id"`
+		Name             string  `json:"console_name"`
+		TotalHours       float64 `json:"total_hours"`
+		TotalRevenue     int     `json:"total_revenue"`
+		TotalTransactions int    `json:"total_transactions"`
+	}
+	
+	var consoleStats []ConsoleStats
+	for rows.Next() {
+		var stat ConsoleStats
+		var totalMinutes int
+		if err := rows.Scan(&stat.ID, &stat.Name, &totalMinutes, &stat.TotalRevenue, &stat.TotalTransactions); err != nil {
+			return fiber.NewError(http.StatusInternalServerError, err.Error())
+		}
+		stat.TotalHours = float64(totalMinutes) / 60.0
+		consoleStats = append(consoleStats, stat)
+	}
+	
+	totalHours := float64(totalMinutes) / 60.0
+	
+	return c.JSON(fiber.Map{
+		"month": monthParam,
+		"summary": fiber.Map{
+			"total_hours": totalHours,
+			"total_revenue": totalRevenue,
+			"total_transactions": totalTransactions,
+		},
+		"console_breakdown": consoleStats,
+	})
+}
+
+// transactionReport returns filtered transactions based on search criteria
+func (a *API) transactionReport(c *fiber.Ctx) error {
+	// Parse query parameters
+	dateFrom := c.Query("date_from")
+	dateTo := c.Query("date_to")
+	consoleIDParam := c.Query("console_id")
+	minAmount := c.Query("min_amount")
+	maxAmount := c.Query("max_amount")
+	
+	// Build the query dynamically
+	query := `SELECT t.id, t.console_id, c.name as console_name, t.start_time, t.end_time, 
+	                 t.duration_minutes, t.total_price, t.price_per_hour_snapshot 
+	          FROM transactions t 
+	          JOIN consoles c ON t.console_id = c.id 
+	          WHERE 1=1`
+	
+	var args []interface{}
+	
+	// Add date filters
+	if dateFrom != "" {
+		if _, err := time.Parse("2006-01-02", dateFrom); err != nil {
+			return fiber.NewError(http.StatusBadRequest, "invalid date_from format, use YYYY-MM-DD")
+		}
+		query += " AND DATE(t.start_time) >= ?"
+		args = append(args, dateFrom)
+	}
+	
+	if dateTo != "" {
+		if _, err := time.Parse("2006-01-02", dateTo); err != nil {
+			return fiber.NewError(http.StatusBadRequest, "invalid date_to format, use YYYY-MM-DD")
+		}
+		query += " AND DATE(t.start_time) <= ?"
+		args = append(args, dateTo)
+	}
+	
+	// Add console filter
+	if consoleIDParam != "" {
+		query += " AND t.console_id = ?"
+		args = append(args, consoleIDParam)
+	}
+	
+	// Add amount filters
+	if minAmount != "" {
+		query += " AND t.total_price >= ?"
+		args = append(args, minAmount)
+	}
+	
+	if maxAmount != "" {
+		query += " AND t.total_price <= ?"
+		args = append(args, maxAmount)
+	}
+	
+	query += " ORDER BY t.start_time DESC LIMIT 100"
+	
+	rows, err := a.DB.Query(query, args...)
+	if err != nil {
+		return fiber.NewError(http.StatusInternalServerError, err.Error())
+	}
+	defer rows.Close()
+	
+	type TransactionDetail struct {
+		ID                   int64     `json:"id"`
+		ConsoleID            int64     `json:"console_id"`
+		ConsoleName          string    `json:"console_name"`
+		StartTime            time.Time `json:"start_time"`
+		EndTime              time.Time `json:"end_time"`
+		DurationMin          int       `json:"duration_minutes"`
+		TotalPrice           int       `json:"total_price"`
+		PricePerHourSnapshot int       `json:"price_per_hour"`
+	}
+	
+	var transactions []TransactionDetail
+	for rows.Next() {
+		var t TransactionDetail
+		if err := rows.Scan(&t.ID, &t.ConsoleID, &t.ConsoleName, &t.StartTime, &t.EndTime, 
+			&t.DurationMin, &t.TotalPrice, &t.PricePerHourSnapshot); err != nil {
+			return fiber.NewError(http.StatusInternalServerError, err.Error())
+		}
+		transactions = append(transactions, t)
+	}
+	
+	return c.JSON(transactions)
+}
+
+// exportTransactions exports transactions to CSV format
+func (a *API) exportTransactions(c *fiber.Ctx) error {
+	// Use the same filtering logic as transactionReport
+	dateFrom := c.Query("date_from")
+	dateTo := c.Query("date_to")
+	consoleIDParam := c.Query("console_id")
+	minAmount := c.Query("min_amount")
+	maxAmount := c.Query("max_amount")
+	
+	query := `SELECT t.id, t.console_id, c.name as console_name, t.start_time, t.end_time, 
+	                 t.duration_minutes, t.total_price, t.price_per_hour_snapshot 
+	          FROM transactions t 
+	          JOIN consoles c ON t.console_id = c.id 
+	          WHERE 1=1`
+	
+	var args []interface{}
+	
+	// Add filters (same logic as transactionReport)
+	if dateFrom != "" {
+		if _, err := time.Parse("2006-01-02", dateFrom); err != nil {
+			return fiber.NewError(http.StatusBadRequest, "invalid date_from format, use YYYY-MM-DD")
+		}
+		query += " AND DATE(t.start_time) >= ?"
+		args = append(args, dateFrom)
+	}
+	
+	if dateTo != "" {
+		if _, err := time.Parse("2006-01-02", dateTo); err != nil {
+			return fiber.NewError(http.StatusBadRequest, "invalid date_to format, use YYYY-MM-DD")
+		}
+		query += " AND DATE(t.start_time) <= ?"
+		args = append(args, dateTo)
+	}
+	
+	if consoleIDParam != "" {
+		query += " AND t.console_id = ?"
+		args = append(args, consoleIDParam)
+	}
+	
+	if minAmount != "" {
+		query += " AND t.total_price >= ?"
+		args = append(args, minAmount)
+	}
+	
+	if maxAmount != "" {
+		query += " AND t.total_price <= ?"
+		args = append(args, maxAmount)
+	}
+	
+	query += " ORDER BY t.start_time DESC"
+	
+	rows, err := a.DB.Query(query, args...)
+	if err != nil {
+		return fiber.NewError(http.StatusInternalServerError, err.Error())
+	}
+	defer rows.Close()
+	
+	// Set CSV headers
+	c.Set("Content-Type", "text/csv")
+	c.Set("Content-Disposition", "attachment; filename=transactions.csv")
+	
+	// Write CSV header
+	csvData := "ID,Console ID,Console Name,Start Time,End Time,Duration (Minutes),Total Price,Price Per Hour\n"
+	
+	// Write CSV data
+	for rows.Next() {
+		var id, consoleID, durationMin, totalPrice, pricePerHour int64
+		var consoleName string
+		var startTime, endTime time.Time
+		
+		if err := rows.Scan(&id, &consoleID, &consoleName, &startTime, &endTime, 
+			&durationMin, &totalPrice, &pricePerHour); err != nil {
+			return fiber.NewError(http.StatusInternalServerError, err.Error())
+		}
+		
+		csvData += fmt.Sprintf("%d,%d,%s,%s,%s,%d,%d,%d\n",
+			id, consoleID, consoleName,
+			startTime.Format("2006-01-02 15:04:05"),
+			endTime.Format("2006-01-02 15:04:05"),
+			durationMin, totalPrice, pricePerHour)
+	}
+	
+	return c.SendString(csvData)
 }
 
 func (a *API) updatePrice(c *fiber.Ctx) error {
