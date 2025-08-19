@@ -36,8 +36,8 @@ func (a *API) Register(app *fiber.App) {
 	app.Get("/me", a.me)
 
 	// -------- Grouped Protected Routes --------
-	userGroup := app.Group("/", a.authRequired("user"))   // any logged in user (role user/admin)
-	adminGroup := app.Group("/", a.authRequired("admin")) // admin only
+	userGroup := app.Group("/api/", a.authRequired("user"))   // any logged in user (role user/admin)
+	adminGroup := app.Group("/api/", a.authRequired("admin")) // admin only
 
 	// user capabilities (includes admin)
 	userGroup.Post("start", a.start)
@@ -59,6 +59,23 @@ func (a *API) Register(app *fiber.App) {
 	adminGroup.Delete("users/:id", a.deleteUser)
 	adminGroup.Post("price", a.updatePrice)
 	adminGroup.Post("mqtt/config", a.mqttConfig)
+
+	// Legacy routes without /api prefix for backward compatibility
+	app.Post("/start", a.authRequired("user"), a.start)
+	app.Post("/extend", a.authRequired("user"), a.extend)
+	app.Post("/stop", a.authRequired("user"), a.stop)
+	app.Get("/status", a.authRequired("user"), a.status)
+	app.Get("/transactions/:console_id", a.authRequired("user"), a.transactions)
+	app.Get("/mqtt/status", a.authRequired("user"), a.mqttStatus)
+	app.Get("/reports/daily", a.authRequired("user"), a.dailyReport)
+	app.Get("/reports/monthly", a.authRequired("user"), a.monthlyReport)
+	app.Get("/reports/transactions", a.authRequired("user"), a.transactionReport)
+	app.Get("/reports/export", a.authRequired("user"), a.exportTransactions)
+	app.Get("/users", a.authRequired("admin"), a.listUsers)
+	app.Post("/users", a.authRequired("admin"), a.createUser)
+	app.Delete("/users/:id", a.authRequired("admin"), a.deleteUser)
+	app.Post("/price", a.authRequired("admin"), a.updatePrice)
+	app.Post("/mqtt/config", a.authRequired("admin"), a.mqttConfig)
 }
 
 // session cookie name
