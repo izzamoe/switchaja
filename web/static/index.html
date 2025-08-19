@@ -13,6 +13,7 @@
       <button id="refreshBtn" class="btn ghost" title="Refresh (R)">⟳</button>
       <button id="darkToggle" class="btn ghost" title="Tema">🌙</button>
   <button id="mqttBtn" class="btn ghost" title="MQTT Status">MQTT: <span id="mqttStatus">?</span></button>
+      <button id="reportsBtn" class="btn ghost" title="Laporan" style="display:none">📊</button>
       <button id="adminBtn" class="btn ghost" title="Admin" style="display:none">⚙️</button>
       <button id="logoutBtn" class="btn ghost" title="Logout" style="display:none">⎋</button>
     </div>
@@ -46,10 +47,11 @@ document.getElementById('refreshBtn').addEventListener('click', () => sendStatus
 document.addEventListener('keydown', e=>{ if(e.key.toLowerCase()==='r') sendStatusRequest(); });
 document.getElementById('mqttBtn').addEventListener('click', openMqttModal);
 // gunakan wrapper agar tidak ReferenceError sebelum fungsi didefinisikan (script kedua)
+document.getElementById('reportsBtn').addEventListener('click', ()=>{ if(typeof openReportsPanel==='function'){ openReportsPanel(); } });
 document.getElementById('adminBtn').addEventListener('click', ()=>{ if(typeof openAdminPanel==='function'){ openAdminPanel(); } });
 document.getElementById('logoutBtn').addEventListener('click', async ()=>{ await fetch('/logout',{method:'POST'}); location.href='/login'; });
 
-fetch('/me').then(r=>{ if(!r.ok){ location.href='/login'; return; } return r.json(); }).then(u=>{ currentUser=u; if(u.role==='admin'){ document.getElementById('adminBtn').style.display='inline-flex'; } document.getElementById('logoutBtn').style.display='inline-flex'; }).catch(()=>{ location.href='/login'; });
+fetch('/me').then(r=>{ if(!r.ok){ location.href='/login'; return; } return r.json(); }).then(u=>{ currentUser=u; document.getElementById('reportsBtn').style.display='inline-flex'; if(u.role==='admin'){ document.getElementById('adminBtn').style.display='inline-flex'; } document.getElementById('logoutBtn').style.display='inline-flex'; }).catch(()=>{ location.href='/login'; });
 
 function tickClock(){
   const d=new Date();
@@ -351,6 +353,278 @@ function openAdminPanel(){
     });
     wrap.querySelectorAll('[data-del]').forEach(btn=>btn.addEventListener('click', async ()=>{ if(!confirm('Hapus user?')) return; const id=btn.getAttribute('data-del'); const res=await fetch('/users/'+id,{method:'DELETE'}); if(res.ok){ btn.closest('tr').remove(); } }));
   });
+}
+
+function openReportsPanel(){
+  if(!currentUser) return;
+  const root=document.getElementById('modal-root');
+  const wrap=document.createElement('div'); wrap.className='modal-backdrop';
+  
+  const today = new Date().toISOString().split('T')[0];
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  
+  wrap.innerHTML=`<div class="modal" style="max-width:800px;"><button class="close" onclick="this.closest('.modal-backdrop').remove()">✖</button><h3>📊 Laporan Transaksi</h3>
+    <section style="display:flex;flex-direction:column;gap:20px;">
+      <!-- Daily Summary -->
+      <div>
+        <h4 style="margin:0 0 10px;font-size:.9rem;">Ringkasan Harian</h4>
+        <div style="display:flex;gap:10px;align-items:end;margin-bottom:10px;">
+          <label style="flex:1">Tanggal<input type="date" id="dailyDate" value="${today}" /></label>
+          <button class="btn primary" onclick="loadDailyReport()">Tampilkan</button>
+        </div>
+        <div id="dailyResults" style="background:#f5f5f5;padding:10px;border-radius:4px;min-height:50px;">
+          <p style="margin:0;color:#666;">Pilih tanggal dan klik "Tampilkan"</p>
+        </div>
+      </div>
+      
+      <!-- Monthly Summary -->
+      <div>
+        <h4 style="margin:0 0 10px;font-size:.9rem;">Ringkasan Bulanan</h4>
+        <div style="display:flex;gap:10px;align-items:end;margin-bottom:10px;">
+          <label style="flex:1">Bulan<input type="month" id="monthlyDate" value="${thisMonth}" /></label>
+          <button class="btn primary" onclick="loadMonthlyReport()">Tampilkan</button>
+        </div>
+        <div id="monthlyResults" style="background:#f5f5f5;padding:10px;border-radius:4px;min-height:50px;">
+          <p style="margin:0;color:#666;">Pilih bulan dan klik "Tampilkan"</p>
+        </div>
+      </div>
+      
+      <!-- Transaction Search -->
+      <div>
+        <h4 style="margin:0 0 10px;font-size:.9rem;">Cari & Filter Transaksi</h4>
+        <form id="searchForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:10px;">
+          <label>Dari Tanggal<input type="date" name="date_from" /></label>
+          <label>Sampai Tanggal<input type="date" name="date_to" /></label>
+          <label>Konsol<select name="console_id" id="consoleSelect"><option value="">Semua Konsol</option></select></label>
+          <label>Min. Amount<input type="number" name="min_amount" placeholder="0" /></label>
+          <label>Max. Amount<input type="number" name="max_amount" placeholder="" /></label>
+          <div style="display:flex;gap:5px;">
+            <button type="submit" class="btn primary">Cari</button>
+            <button type="button" class="btn ghost" onclick="exportTransactions()">Export CSV</button>
+          </div>
+        </form>
+        <div id="searchResults" style="background:#f5f5f5;padding:10px;border-radius:4px;min-height:50px;max-height:300px;overflow-y:auto;">
+          <p style="margin:0;color:#666;">Gunakan filter di atas untuk mencari transaksi</p>
+        </div>
+      </div>
+      
+      <!-- Receipt Generator -->
+      <div>
+        <h4 style="margin:0 0 10px;font-size:.9rem;">Cetak Struk</h4>
+        <p style="margin:0 0 10px;font-size:.8rem;color:#666;">Pilih transaksi di atas, lalu klik "Buat Struk" untuk melihat/cetak struk sederhana</p>
+        <div id="receiptArea" style="background:#fff;padding:15px;border:1px solid #ddd;border-radius:4px;font-family:monospace;font-size:.8rem;display:none;">
+          <!-- Receipt content will be inserted here -->
+        </div>
+      </div>
+    </section></div>`;
+  
+  root.innerHTML=''; root.appendChild(wrap);
+  
+  // Load console options
+  fetch('/status').then(r=>r.json()).then(consoles=>{
+    const select = document.getElementById('consoleSelect');
+    consoles.forEach(c=>{
+      const option = document.createElement('option');
+      option.value = c.id;
+      option.textContent = c.name;
+      select.appendChild(option);
+    });
+  });
+  
+  // Setup search form
+  document.getElementById('searchForm').addEventListener('submit', async ev=>{
+    ev.preventDefault();
+    const formData = new FormData(ev.target);
+    const params = new URLSearchParams();
+    for(const [key, value] of formData.entries()){
+      if(value) params.append(key, value);
+    }
+    
+    const res = await fetch('/reports/transactions?' + params.toString());
+    const transactions = await res.json();
+    displayTransactionResults(transactions);
+  });
+}
+
+function loadDailyReport(){
+  const date = document.getElementById('dailyDate').value;
+  if(!date) return;
+  
+  fetch('/reports/daily?date=' + date)
+    .then(r=>r.json())
+    .then(data=>{
+      document.getElementById('dailyResults').innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;text-align:center;">
+          <div>
+            <div style="font-size:1.5rem;font-weight:bold;color:#2196F3;">${data.total_hours.toFixed(1)}</div>
+            <div style="font-size:.8rem;color:#666;">Total Jam</div>
+          </div>
+          <div>
+            <div style="font-size:1.5rem;font-weight:bold;color:#4CAF50;">Rp ${data.total_revenue.toLocaleString()}</div>
+            <div style="font-size:.8rem;color:#666;">Total Pemasukan</div>
+          </div>
+          <div>
+            <div style="font-size:1.5rem;font-weight:bold;color:#FF9800;">${data.total_transactions}</div>
+            <div style="font-size:.8rem;color:#666;">Total Transaksi</div>
+          </div>
+        </div>
+      `;
+    })
+    .catch(err=>{
+      document.getElementById('dailyResults').innerHTML = `<p style="margin:0;color:red;">Error: ${err.message}</p>`;
+    });
+}
+
+function loadMonthlyReport(){
+  const month = document.getElementById('monthlyDate').value;
+  if(!month) return;
+  
+  fetch('/reports/monthly?month=' + month)
+    .then(r=>r.json())
+    .then(data=>{
+      const summary = data.summary;
+      const breakdown = data.console_breakdown;
+      
+      document.getElementById('monthlyResults').innerHTML = `
+        <div style="margin-bottom:20px;">
+          <h5 style="margin:0 0 10px;">Ringkasan Keseluruhan</h5>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;text-align:center;margin-bottom:20px;">
+            <div>
+              <div style="font-size:1.3rem;font-weight:bold;color:#2196F3;">${summary.total_hours.toFixed(1)}</div>
+              <div style="font-size:.8rem;color:#666;">Total Jam</div>
+            </div>
+            <div>
+              <div style="font-size:1.3rem;font-weight:bold;color:#4CAF50;">Rp ${summary.total_revenue.toLocaleString()}</div>
+              <div style="font-size:.8rem;color:#666;">Total Omzet</div>
+            </div>
+            <div>
+              <div style="font-size:1.3rem;font-weight:bold;color:#FF9800;">${summary.total_transactions}</div>
+              <div style="font-size:.8rem;color:#666;">Total Transaksi</div>
+            </div>
+          </div>
+        </div>
+        
+        <div>
+          <h5 style="margin:0 0 10px;">Breakdown Per Konsol</h5>
+          <table class="table" style="font-size:.8rem;">
+            <thead>
+              <tr><th>Konsol</th><th>Jam Main</th><th>Omzet</th><th>Transaksi</th></tr>
+            </thead>
+            <tbody>
+              ${breakdown.map(c=>`
+                <tr>
+                  <td>${c.console_name}</td>
+                  <td>${c.total_hours.toFixed(1)}h</td>
+                  <td>Rp ${c.total_revenue.toLocaleString()}</td>
+                  <td>${c.total_transactions}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    })
+    .catch(err=>{
+      document.getElementById('monthlyResults').innerHTML = `<p style="margin:0;color:red;">Error: ${err.message}</p>`;
+    });
+}
+
+function displayTransactionResults(transactions){
+  const resultsDiv = document.getElementById('searchResults');
+  
+  if(!transactions || transactions.length === 0){
+    resultsDiv.innerHTML = '<p style="margin:0;color:#666;">Tidak ada transaksi yang ditemukan</p>';
+    return;
+  }
+  
+  resultsDiv.innerHTML = `
+    <table class="table" style="font-size:.75rem;">
+      <thead>
+        <tr><th>ID</th><th>Konsol</th><th>Mulai</th><th>Selesai</th><th>Durasi</th><th>Total</th><th>Aksi</th></tr>
+      </thead>
+      <tbody>
+        ${transactions.map(t=>`
+          <tr>
+            <td>${t.id}</td>
+            <td>${t.console_name}</td>
+            <td>${new Date(t.start_time).toLocaleString('id-ID', {dateStyle:'short', timeStyle:'short'})}</td>
+            <td>${new Date(t.end_time).toLocaleString('id-ID', {dateStyle:'short', timeStyle:'short'})}</td>
+            <td>${t.duration_minutes}m</td>
+            <td>Rp ${t.total_price.toLocaleString()}</td>
+            <td><button class="btn ghost sm" onclick="generateReceipt(${JSON.stringify(t).replace(/"/g, '&quot;')})">Buat Struk</button></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function exportTransactions(){
+  const form = document.getElementById('searchForm');
+  const formData = new FormData(form);
+  const params = new URLSearchParams();
+  for(const [key, value] of formData.entries()){
+    if(value) params.append(key, value);
+  }
+  
+  // Create download link
+  const url = '/reports/export?' + params.toString();
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'transactions.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function generateReceipt(transaction){
+  const receiptArea = document.getElementById('receiptArea');
+  const startTime = new Date(transaction.start_time);
+  const endTime = new Date(transaction.end_time);
+  
+  receiptArea.innerHTML = `
+    <div style="text-align:center;border-bottom:1px dashed #000;padding-bottom:10px;margin-bottom:10px;">
+      <h3 style="margin:0;">🎮 RENTAL PS</h3>
+      <p style="margin:5px 0;">Struk Pembayaran</p>
+    </div>
+    
+    <div style="margin-bottom:15px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:5px;">
+        <span>Konsol:</span>
+        <span><strong>${transaction.console_name}</strong></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:5px;">
+        <span>Mulai:</span>
+        <span>${startTime.toLocaleString('id-ID')}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:5px;">
+        <span>Selesai:</span>
+        <span>${endTime.toLocaleString('id-ID')}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:5px;">
+        <span>Durasi:</span>
+        <span>${transaction.duration_minutes} menit</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:5px;">
+        <span>Tarif/jam:</span>
+        <span>Rp ${transaction.price_per_hour.toLocaleString()}</span>
+      </div>
+    </div>
+    
+    <div style="border-top:1px dashed #000;padding-top:10px;">
+      <div style="display:flex;justify-content:space-between;font-size:1.1rem;font-weight:bold;">
+        <span>TOTAL:</span>
+        <span>Rp ${transaction.total_price.toLocaleString()}</span>
+      </div>
+    </div>
+    
+    <div style="text-align:center;margin-top:15px;padding-top:10px;border-top:1px dashed #000;">
+      <p style="margin:5px 0;font-size:.7rem;">Terima kasih telah bermain!</p>
+      <button class="btn primary" onclick="window.print()" style="margin-top:10px;">🖨️ Cetak Struk</button>
+    </div>
+  `;
+  
+  receiptArea.style.display = 'block';
 }
 </script>
 </body>
