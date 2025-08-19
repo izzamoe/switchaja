@@ -37,3 +37,4 @@ node_modules/
 .DS_Store
 
 # Do not ignore source directory cmd/server; previously 'server' caused it to be skipped.
+server
