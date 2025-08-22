@@ -38,7 +38,7 @@ func TestIsValidToken(t *testing.T) {
 
 func TestNewToken(t *testing.T) {
 	username := "testuser"
-	
+
 	// Generate two tokens
 	token1 := newToken(username)
 	time.Sleep(time.Nanosecond) // Ensure different timestamps
@@ -46,11 +46,11 @@ func TestNewToken(t *testing.T) {
 
 	// Tokens should be different
 	assert.NotEqual(t, token1, token2)
-	
+
 	// Both tokens should contain the username
 	assert.Contains(t, token1, username)
 	assert.Contains(t, token2, username)
-	
+
 	// Tokens should be non-empty
 	assert.NotEmpty(t, token1)
 	assert.NotEmpty(t, token2)
@@ -59,11 +59,11 @@ func TestNewToken(t *testing.T) {
 func TestNewToken_Format(t *testing.T) {
 	username := "admin"
 	token := newToken(username)
-	
+
 	// Token should have the format: hexNumber-username
 	assert.Contains(t, token, "-")
 	assert.Contains(t, token, username)
-	
+
 	// Split and verify format
 	parts := len(token)
 	assert.Greater(t, parts, len(username)+1) // Should be longer than just username + dash

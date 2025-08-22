@@ -16,7 +16,7 @@ import (
 
 // Server represents the HTTP server
 type Server struct {
-	app     *app.Application
+	app      *app.Application
 	fiberApp *fiber.App
 }
 
@@ -129,7 +129,7 @@ func (s *Server) runBackgroundLoop() {
 	fast := 2 * time.Second
 	slow := 10 * time.Second
 	lastTick := time.Now()
-	
+
 	apiLayer := api.New(s.app.Database, s.app.IoTSender, s.app.Hub)
 
 	for {

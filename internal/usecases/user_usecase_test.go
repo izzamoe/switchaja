@@ -25,7 +25,7 @@ func TestUserUseCase_CreateUser(t *testing.T) {
 	t.Run("success - admin user", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		username := "admin"
 		password := "password123"
 		role := entities.RoleAdmin
@@ -44,7 +44,7 @@ func TestUserUseCase_CreateUser(t *testing.T) {
 	t.Run("empty username", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		_, err := useCase.CreateUser("", "password", entities.RoleUser)
 
 		assert.Error(t, err)
@@ -56,7 +56,7 @@ func TestUserUseCase_CreateUser(t *testing.T) {
 	t.Run("invalid role", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		_, err := useCase.CreateUser("user1", "password", "invalid_role")
 
 		assert.Error(t, err)
@@ -68,7 +68,7 @@ func TestUserUseCase_CreateUser(t *testing.T) {
 	t.Run("user already exists", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		username := "existing_user"
 		existingUser := &entities.User{ID: 1, Username: username}
 
@@ -87,7 +87,7 @@ func TestUserUseCase_AuthenticateUser(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		username := "testuser"
 		password := "password123"
 		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -109,7 +109,7 @@ func TestUserUseCase_AuthenticateUser(t *testing.T) {
 	t.Run("empty username", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		_, err := useCase.AuthenticateUser("", "password")
 
 		assert.Error(t, err)
@@ -120,7 +120,7 @@ func TestUserUseCase_AuthenticateUser(t *testing.T) {
 	t.Run("user not found", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		username := "nonexistent"
 
 		userRepo.On("GetByUsername", username).Return(nil, "", sql.ErrNoRows)
@@ -136,7 +136,7 @@ func TestUserUseCase_AuthenticateUser(t *testing.T) {
 	t.Run("wrong password", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		username := "testuser"
 		correctPassword := "correct_password"
 		wrongPassword := "wrong_password"
@@ -162,7 +162,7 @@ func TestUserUseCase_GetAllUsers(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		expectedUsers := []entities.User{
 			{ID: 1, Username: "admin", Role: entities.RoleAdmin},
 			{ID: 2, Username: "user1", Role: entities.RoleUser},
@@ -180,7 +180,7 @@ func TestUserUseCase_GetAllUsers(t *testing.T) {
 	t.Run("repository error", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		repoError := errors.New("database error")
 		userRepo.On("GetAll").Return([]entities.User(nil), repoError)
 
@@ -199,7 +199,7 @@ func TestUserUseCase_DeleteUser(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		userID := int64(1)
 
 		userRepo.On("Delete", userID).Return(nil)
@@ -213,7 +213,7 @@ func TestUserUseCase_DeleteUser(t *testing.T) {
 	t.Run("invalid user ID", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		err := useCase.DeleteUser(0)
 
 		assert.Error(t, err)
@@ -227,7 +227,7 @@ func TestUserUseCase_GetUserCount(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		expectedCount := 5
 
 		userRepo.On("Count").Return(expectedCount, nil)
@@ -242,7 +242,7 @@ func TestUserUseCase_GetUserCount(t *testing.T) {
 	t.Run("repository error", func(t *testing.T) {
 		userRepo := &mocks.MockUserRepository{}
 		useCase := NewUserUseCase(userRepo)
-		
+
 		repoError := errors.New("database error")
 		userRepo.On("Count").Return(0, repoError)
 

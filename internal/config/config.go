@@ -20,8 +20,8 @@ type ServerConfig struct {
 
 // DatabaseConfig holds database-related configuration
 type DatabaseConfig struct {
-	Path     string
-	SQLMode  string // aggressive|balanced|safe
+	Path    string
+	SQLMode string // aggressive|balanced|safe
 }
 
 // MQTTConfig holds MQTT-related configuration
@@ -35,9 +35,9 @@ type MQTTConfig struct {
 
 // AppConfig holds application-specific configuration
 type AppConfig struct {
-	ConsoleCount  int
-	DefaultPrice  int
-	DefaultAdmin  AdminConfig
+	ConsoleCount int
+	DefaultPrice int
+	DefaultAdmin AdminConfig
 }
 
 // AdminConfig holds default admin configuration

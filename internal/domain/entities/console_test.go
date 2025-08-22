@@ -40,7 +40,7 @@ func TestConsole_IsRunning(t *testing.T) {
 
 func TestConsole_IsExpired(t *testing.T) {
 	now := time.Now()
-	
+
 	tests := []struct {
 		name     string
 		status   string
@@ -86,7 +86,7 @@ func TestConsole_IsExpired(t *testing.T) {
 
 func TestConsole_TimeRemaining(t *testing.T) {
 	now := time.Now()
-	
+
 	tests := []struct {
 		name     string
 		status   string
@@ -126,7 +126,7 @@ func TestConsole_TimeRemaining(t *testing.T) {
 				EndTime: tt.endTime,
 			}
 			remaining := console.TimeRemaining()
-			
+
 			// Allow for small time differences due to test execution time
 			if tt.expected > 0 {
 				assert.InDelta(t, tt.expected.Seconds(), remaining.Seconds(), 1.0)

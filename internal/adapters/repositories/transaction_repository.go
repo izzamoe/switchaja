@@ -21,22 +21,22 @@ func NewSQLTransactionRepository(database *sql.DB) repositories.TransactionRepos
 func (r *SQLTransactionRepository) Create(transaction *entities.Transaction) error {
 	query := `INSERT INTO transactions (console_id, start_time, end_time, duration_minutes, total_price, price_per_hour_snapshot) 
 			  VALUES (?, ?, ?, ?, ?, ?)`
-	result, err := r.db.Exec(query, 
-		transaction.ConsoleID, 
-		transaction.StartTime, 
-		transaction.EndTime, 
-		transaction.DurationMin, 
-		transaction.TotalPrice, 
+	result, err := r.db.Exec(query,
+		transaction.ConsoleID,
+		transaction.StartTime,
+		transaction.EndTime,
+		transaction.DurationMin,
+		transaction.TotalPrice,
 		transaction.PricePerHourSnapshot)
 	if err != nil {
 		return err
 	}
-	
+
 	id, err := result.LastInsertId()
 	if err != nil {
 		return err
 	}
-	
+
 	transaction.ID = id
 	return nil
 }
@@ -58,7 +58,7 @@ func (r *SQLTransactionRepository) GetByConsoleID(consoleID int64, limit int) ([
 		}
 		transactions = append(transactions, t)
 	}
-	
+
 	return transactions, nil
 }
 
