@@ -1,0 +1,72 @@
+# GitHub Copilot Environment Configuration
+# Standard schema for GitHub Copilot Agent environment setup
+# Reference: https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/customize-the-agent-environment
+
+name: switchaja-go-environment
+description: "Go development environment for switchaja web server with MCP integration"
+
+# Language and runtime specification
+language: go
+runtime:
+  version: "1.24.x"
+
+# Project context
+project:
+  name: switchaja
+  type: web-server
+  main_module: switchiot
+  build_path: ./cmd/server
+
+# Environment setup steps
+setup:
+  - name: "Verify Go installation"
+    run: "go version"
+    description: "Ensure Go 1.24.x is available"
+  
+  - name: "Install Go documentation MCP server"
+    run: "go install github.com/mrjoshuak/godoc-mcp@latest"
+    description: "Install MCP server for enhanced Go documentation access"
+  
+  - name: "Download dependencies"
+    run: "go mod tidy"
+    description: "Initialize and download Go module dependencies"
+
+# Environment variables
+env:
+  CGO_ENABLED: "0"
+  GO111MODULE: "on"
+  GOPATH: "${HOME}/go"
+
+# Build configuration
+build:
+  command: "go build ./cmd/server"
+  output: switchaja-server
+  flags: ["-ldflags=-s -w"]
+
+# Test configuration  
+test:
+  command: "go test ./..."
+  coverage: true
+
+# Available tools
+tools:
+  - name: go
+    version: "1.24.x"
+    type: compiler
+  
+  - name: godoc-mcp
+    type: mcp-server
+    description: "Go documentation and symbol lookup"
+    executable: ~/go/bin/godoc-mcp
+
+# Verification steps
+verify:
+  - name: "MCP server availability"
+    run: "test -f ~/go/bin/godoc-mcp"
+  
+  - name: "Module structure"
+    run: "go list -m"
+    expect: "switchiot"
+  
+  - name: "Build verification"
+    run: "go build ./cmd/server"
