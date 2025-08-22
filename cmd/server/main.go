@@ -24,7 +24,7 @@ func main() {
 
 	// Create and configure HTTP server
 	httpServer := server.NewServer(application)
-	
+
 	// Start background tasks
 	httpServer.StartBackgroundTasks()
 

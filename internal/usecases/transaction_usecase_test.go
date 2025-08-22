@@ -23,7 +23,7 @@ func TestTransactionUseCase_GetTransactionsByConsole(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		transactionRepo := &mocks.MockTransactionRepository{}
 		useCase := NewTransactionUseCase(transactionRepo)
-		
+
 		consoleID := int64(1)
 		expectedTransactions := []entities.Transaction{
 			{
@@ -48,7 +48,7 @@ func TestTransactionUseCase_GetTransactionsByConsole(t *testing.T) {
 	t.Run("repository error", func(t *testing.T) {
 		transactionRepo := &mocks.MockTransactionRepository{}
 		useCase := NewTransactionUseCase(transactionRepo)
-		
+
 		consoleID := int64(1)
 		repoError := errors.New("database error")
 
@@ -69,7 +69,7 @@ func TestTransactionUseCase_GetLastTransaction(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		transactionRepo := &mocks.MockTransactionRepository{}
 		useCase := NewTransactionUseCase(transactionRepo)
-		
+
 		consoleID := int64(1)
 		expectedTransaction := &entities.Transaction{
 			ID:          1,
@@ -92,7 +92,7 @@ func TestTransactionUseCase_GetLastTransaction(t *testing.T) {
 	t.Run("repository error", func(t *testing.T) {
 		transactionRepo := &mocks.MockTransactionRepository{}
 		useCase := NewTransactionUseCase(transactionRepo)
-		
+
 		consoleID := int64(1)
 		repoError := errors.New("database error")
 

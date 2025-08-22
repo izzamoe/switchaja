@@ -23,26 +23,26 @@ func (e *DomainError) Unwrap() error {
 // Error codes
 const (
 	// Console errors
-	CodeConsoleNotFound     = "CONSOLE_NOT_FOUND"
+	CodeConsoleNotFound       = "CONSOLE_NOT_FOUND"
 	CodeConsoleAlreadyRunning = "CONSOLE_ALREADY_RUNNING"
-	CodeConsoleNotRunning   = "CONSOLE_NOT_RUNNING"
-	CodeInvalidDuration     = "INVALID_DURATION"
-	CodeInvalidPrice        = "INVALID_PRICE"
+	CodeConsoleNotRunning     = "CONSOLE_NOT_RUNNING"
+	CodeInvalidDuration       = "INVALID_DURATION"
+	CodeInvalidPrice          = "INVALID_PRICE"
 
 	// User errors
-	CodeUserNotFound        = "USER_NOT_FOUND"
-	CodeInvalidCredentials  = "INVALID_CREDENTIALS"
-	CodeUserAlreadyExists   = "USER_ALREADY_EXISTS"
-	CodeInvalidUserData     = "INVALID_USER_DATA"
-	CodeUnauthorized        = "UNAUTHORIZED"
+	CodeUserNotFound       = "USER_NOT_FOUND"
+	CodeInvalidCredentials = "INVALID_CREDENTIALS"
+	CodeUserAlreadyExists  = "USER_ALREADY_EXISTS"
+	CodeInvalidUserData    = "INVALID_USER_DATA"
+	CodeUnauthorized       = "UNAUTHORIZED"
 
 	// Transaction errors
 	CodeTransactionNotFound = "TRANSACTION_NOT_FOUND"
 	CodeInvalidTransaction  = "INVALID_TRANSACTION"
 
 	// General errors
-	CodeInternalError       = "INTERNAL_ERROR"
-	CodeValidationError     = "VALIDATION_ERROR"
+	CodeInternalError   = "INTERNAL_ERROR"
+	CodeValidationError = "VALIDATION_ERROR"
 )
 
 // Console errors
