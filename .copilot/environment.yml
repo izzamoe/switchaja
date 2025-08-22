@@ -1,98 +1,72 @@
-# GitHub Copilot Agent Environment Configuration
-# This file configures the development environment for GitHub Copilot Agent
-# with MCP (Model Context Protocol) server support for enhanced Go development
+# GitHub Copilot Environment Configuration
+# Standard schema for GitHub Copilot Agent environment setup
+# Reference: https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/customize-the-agent-environment
 
-version: "1.0"
+name: switchaja-go-environment
+description: "Go development environment for switchaja web server with MCP integration"
 
-# Environment configuration
-environment:
-  name: "switchaja-go-development"
-  description: "Go development environment with MCP server integration"
-  
-  # Language and runtime configuration
-  language: go
-  go_version: "1.24.x"
-  
-  # Project configuration
-  project:
-    type: "go-web-server"
-    name: "switchaja"
-    main_module: "switchiot"
-    build_target: "./cmd/server"
+# Language and runtime specification
+language: go
+runtime:
+  version: "1.24.x"
 
-# Dependencies and tools setup
+# Project context
+project:
+  name: switchaja
+  type: web-server
+  main_module: switchiot
+  build_path: ./cmd/server
+
+# Environment setup steps
 setup:
-  # Pre-setup verification
-  prerequisites:
-    - name: "go"
-      version: ">=1.24.0"
-      command: "go version"
-    
-  # Installation steps  
-  install:
-    - name: "Install MCP Go Documentation Server"
-      description: "Install the MCP server for Go documentation access"
-      command: "go install github.com/mrjoshuak/godoc-mcp@latest"
-      required: true
-      
-    - name: "Initialize Go modules"
-      description: "Download and verify project dependencies"
-      command: "go mod tidy"
-      working_directory: "."
-      required: true
-
-# MCP Server Configuration
-mcp:
-  enabled: true
-  servers:
-    - name: "godoc-mcp"
-      description: "Go documentation MCP server"
-      executable: "godoc-mcp"
-      install_path: "~/go/bin/godoc-mcp"
-      capabilities:
-        - "documentation"
-        - "code_completion" 
-        - "symbol_lookup"
+  - name: "Verify Go installation"
+    run: "go version"
+    description: "Ensure Go 1.24.x is available"
+  
+  - name: "Install Go documentation MCP server"
+    run: "go install github.com/mrjoshuak/godoc-mcp@latest"
+    description: "Install MCP server for enhanced Go documentation access"
+  
+  - name: "Download dependencies"
+    run: "go mod tidy"
+    description: "Initialize and download Go module dependencies"
 
 # Environment variables
-env_vars:
+env:
   CGO_ENABLED: "0"
   GO111MODULE: "on"
   GOPATH: "${HOME}/go"
-  
-# Build and development configuration  
+
+# Build configuration
 build:
   command: "go build ./cmd/server"
-  output: "switchaja-server"
-  flags:
-    - "-ldflags=-s -w"
-    
-# Testing configuration
+  output: switchaja-server
+  flags: ["-ldflags=-s -w"]
+
+# Test configuration  
 test:
   command: "go test ./..."
   coverage: true
-  
-# Development tools
-tools:
-  - name: "go"
-    type: "compiler"
-    version: "1.24.x"
-    
-  - name: "godoc-mcp"
-    type: "mcp_server"
-    description: "Go documentation MCP server"
 
-# Health checks and verification
-health_checks:
-  - name: "MCP Server Installation"
-    command: "test -f ~/go/bin/godoc-mcp"
-    description: "Verify MCP server is installed"
-    
-  - name: "Go Module Verification"
-    command: "go list -m"
-    expected_output: "switchiot"
-    description: "Verify Go module is properly configured"
-    
-  - name: "Build Test"
-    command: "go build ./cmd/server"
-    description: "Verify project builds successfully"
+# Available tools
+tools:
+  - name: go
+    version: "1.24.x"
+    type: compiler
+  
+  - name: godoc-mcp
+    type: mcp-server
+    description: "Go documentation and symbol lookup"
+    executable: ~/go/bin/godoc-mcp
+
+# Verification steps
+verify:
+  - name: "MCP server availability"
+    run: "test -f ~/go/bin/godoc-mcp"
+  
+  - name: "Module structure"
+    run: "go list -m"
+    expect: "switchiot"
+  
+  - name: "Build verification"
+    run: "go build ./cmd/server"
