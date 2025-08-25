@@ -1,0 +1,81 @@
+# GitHub Copilot Agent Environment Configuration
+# This file configures the agent environment for the switchaja repository
+# Documentation: https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/customize-the-agent-environment
+
+version: "1.0"
+
+# Configure MCP (Model Context Protocol) servers for enhanced context
+mcp:
+  servers:
+    # Go documentation server for Go-specific context and documentation
+    godoc:
+      command: "godoc-mcp"
+      description: "Provides Go documentation and package information for the switchaja project"
+      env:
+        GO_MODULE_ROOT: "."
+        GOPATH: "/home/runner/go"
+      args: []
+      timeout: 30
+
+# Define the tools and context available to the agent
+tools:
+  - name: "go"
+    description: "Go programming language tools"
+    executable: "go"
+  - name: "make"
+    description: "Build automation using Makefile"
+    executable: "make"
+
+# Project-specific context
+context:
+  project_type: "go_web_application"
+  description: "IoT PlayStation Rental Management System with MQTT integration"
+  key_technologies:
+    - "Go 1.24+"
+    - "Fiber web framework"
+    - "SQLite database"
+    - "MQTT protocol"
+    - "WebSocket real-time updates"
+    - "IoT device control"
+  
+  # Important directories and their purposes
+  directories:
+    cmd/server: "Main application entry point"
+    internal/config: "Configuration management"
+    internal/api: "HTTP API handlers and routes"
+    internal/iot: "MQTT and IoT device integration"
+    internal/db: "Database models and operations"
+    web/static: "Frontend web assets"
+    test: "Test files and utilities"
+  
+  # Key configuration files
+  important_files:
+    - "go.mod": "Go module definition and dependencies"
+    - "Makefile": "Build and deployment commands"
+    - "README.md": "Project documentation and setup instructions"
+    - "internal/config/config.go": "Environment variable configuration"
+    - "cmd/server/main.go": "Application entry point"
+
+# Environment variables that the agent should be aware of
+environment_variables:
+  # Server configuration
+  PORT: "Server port (default: 8080)"
+  DB_PATH: "Database file path (default: heheswitch.db)"
+  SQLITE_MODE: "SQLite performance mode (default: balanced)"
+  
+  # MQTT configuration for IoT integration
+  MQTT_BROKER: "MQTT broker URL for IoT device communication"
+  MQTT_PREFIX: "MQTT topic prefix (default: ps)"
+  MQTT_USERNAME: "MQTT authentication username"
+  MQTT_PASSWORD: "MQTT authentication password"
+  MQTT_CLIENT_ID: "MQTT client identifier"
+
+# Code patterns and conventions
+code_conventions:
+  - "Use Go modules for dependency management"
+  - "Follow clean architecture principles with separate layers"
+  - "Use structured logging for debugging"
+  - "Implement comprehensive error handling"
+  - "Write unit tests for business logic"
+  - "Use environment variables for configuration"
+  - "Follow Go naming conventions and best practices"
