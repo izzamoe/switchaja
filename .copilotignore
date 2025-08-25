@@ -1,0 +1,42 @@
+# Files and directories to ignore for GitHub Copilot
+# Similar to .gitignore but specifically for Copilot context
+
+# Dependencies and vendor directories
+vendor/
+node_modules/
+
+# Build artifacts and binaries
+dist/
+build/
+*.exe
+*.dll
+*.so
+*.dylib
+heheswitch
+*.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+/tmp/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Generated files
+*.gen.go
+*.pb.go
+
+# Large data files
+*.dump
+*.backup
+*.sqlite
+
+# Test coverage reports
+coverage.out
+*.cover
